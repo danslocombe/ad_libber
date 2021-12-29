@@ -1,19 +1,95 @@
 use std::collections::HashMap;
-use std::ffi::{CString, CStr};
-use std::os::raw::{c_char};
+use std::str::FromStr;
 
-#[derive(Default, Clone, Debug)]
-pub struct Line
-{
-    line : String,
+#[derive(Clone, Debug)]
+pub enum Command {
+    Wait(u32),
+    Clear,
+}
+
+impl Command {
+    pub fn tick_len(&self) -> u32 {
+        match *self {
+            Command::Wait(delay) => delay,
+            Command::Clear => 0,
+        }
+    }
+
+    pub fn parse(s : &str) -> Option<Self> {
+        let mut splits = s.split_ascii_whitespace();
+        let command = splits.next()?;
+
+        if (unicase::eq_ascii(command, "clear") || unicase::eq_ascii(command, "c")) {
+            Some(Self::Clear)
+        }
+        else if (unicase::eq_ascii(command, "wait") || unicase::eq_ascii(command, "w")) {
+
+            let dur : u32 = if let Some(t) = splits.next() {
+                let mut mult = 1.0;
+                let mut parse_t = t;
+                if (t.ends_with("ms")) {
+                    parse_t = &t[0..(t.len()-2)];
+                    mult = 60.0 / 1000.0;
+                }
+                else if (t.ends_with("s")) {
+                    parse_t = &t[0..(t.len()-1)];
+                    mult = 60.0;
+                }
+
+                let f = mult * f32::from_str(parse_t).expect(&format!("Failed to parse duration from wait command {}", parse_t));
+                f.round() as u32
+            }
+            else {
+                60
+            };
+
+            Some(Self::Wait(dur))
+        }
+        else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum Chunk {
+    Line(String),
+    Command(Command),
+}
+
+impl Chunk {
+    pub fn tick_len(&self) -> u32 {
+        match self {
+            Chunk::Line(s) => s.len() as u32,
+            Chunk::Command(c) => c.tick_len(),
+        }
+    }
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct Dialogue
 {
-    name : String,
-    filename : String,
-    lines : Vec<Line>,
+    pub name : String,
+    pub filename : String,
+    pub chunks : Vec<Chunk>,
+}
+
+impl Dialogue {
+    fn name_eq(&self, other: &Self) -> bool {
+        unicase::eq_ascii(&self.name, &other.name) && unicase::eq_ascii(&self.filename, &other.filename)
+    }
+
+    fn empty(&self) -> bool {
+        for chunk in &self.chunks {
+            if let Chunk::Line(l) = chunk {
+                if (l.len() > 0) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -32,29 +108,46 @@ impl DialogueFile
         let read = std::fs::read_to_string(p)?;
         let lines = read.lines();
         for line in lines {
+            if (line.is_empty() || line.starts_with("#")) {
+                continue;
+            }
+
             if (line.starts_with("[")) {
                 cur_section.take().map(|x| {
-                    sections.push(x);
+                    if (!x.empty())
+                    {
+                        sections.push(x);
+                    }
                 });
 
                 let new_name = &line[1..line.len()-1];
-                eprintln!("Read: {}", new_name);
+                eprintln!("Read Section: {}", new_name);
 
                 cur_section = Some(Dialogue {
                     name: String::from(new_name),
                     filename: p.to_owned(),
-                    lines : vec![],
+                    chunks : vec![],
+                });
+            }
+            else if (line.starts_with("(")) {
+                let command = Command::parse(&line[1..(line.len() - 1)]).expect(&format!("Could not parse command {}", line));
+                eprintln!("parsed command: {:?}", command);
+                cur_section.as_mut().map(|x| {
+                    x.chunks.push(Chunk::Command(command));
                 });
             }
             else {
                 cur_section.as_mut().map(|x| {
-                    x.lines.push(Line{ line: line.to_owned()});
+                    x.chunks.push(Chunk::Line(line.to_owned()));
                 });
             }
         }
 
         cur_section.take().map(|x| {
-            sections.push(x);
+            if (!x.empty())
+            {
+                sections.push(x);
+            }
         });
         
         Ok(Self {
@@ -96,127 +189,76 @@ impl DialogueCache {
     }
 }
 
-const CLEAR_T_MAX : f32 = 35.0;
-const CLEAR_T_SUCK_MIN : f32 = 31.0;
-
-#[derive(Default, Clone, Debug)]
-pub struct Talker
+#[derive(Clone, Debug)]
+pub struct DialogueCursor
 {
-    dialogue : Option<Dialogue>,
-    cur_line_index : usize,
-    cur_string : CString,
-    ////char_rate : f32, 
-    chars : f32,
-    clear_t : f32,
-    next_line_t : f32,
+    dialogue : Dialogue,
+    start : usize,
+    end : usize,
+    line_i : usize,
+    exhausted : bool,
 }
 
-impl Talker {
-    pub fn queue(&mut self, dialogue : &Dialogue) {
-        if let Some(d) = self.dialogue.as_ref() {
-            if unicase::eq_ascii(&d.name, &dialogue.name) && unicase::eq_ascii(&d.filename, &dialogue.filename) {
-                // Already queued
-                // Reduce clear time
-                self.clear_t /= 2.0;
-                return;
-            }
+impl DialogueCursor {
+    pub fn new(dialogue : &Dialogue) -> Self {
+        Self {
+            dialogue : dialogue.clone(),
+            start : 0,
+            end : 0,
+            line_i : 0,
+            exhausted: false,
         }
-
-        self.clear();
-        self.dialogue = Some(dialogue.clone());
     }
 
-    pub fn clear(&mut self) {
-        self.dialogue = None;
-        self.cur_line_index = 0;
-        self.chars = 0.0;
-        self.cur_string = CString::default();
-        self.clear_t = 0.0;
-        self.next_line_t = 0.0;
+    pub fn dialogue_name_eq(&self, other: &Dialogue) -> bool {
+        self.dialogue.name_eq(other)
     }
 
-    pub fn current_ptr(&self) -> *const c_char {
-        self.cur_string.as_ptr()
-    }
-
-    fn get_cur_line(&self) -> &Line {
-        &self.dialogue.as_ref().unwrap().lines[self.cur_line_index]
-    }
-
-    pub fn tick(&mut self, dt_norm : f32) {
-        if (self.dialogue.is_none()) {
-            return;
-        }
-
-        loop {
-            if (self.clear_t > 0.0)
-            {
-                self.clear_t += dt_norm;
-                let cur_line = self.get_cur_line().clone();
-                let line_len = cur_line.line.len();
-                self.cur_string = CString::new(cur_line.line).unwrap();
-
-                let mut ix = 0.0;
-
-                if (self.clear_t > CLEAR_T_SUCK_MIN) {
-                    let norm = ((self.clear_t - CLEAR_T_SUCK_MIN) / (CLEAR_T_MAX-CLEAR_T_SUCK_MIN))
-                        .clamp(0.0, 1.0);
-
-                    ix = line_len as f32 * norm;
+    pub fn get(&self) -> String {
+        let mut s = String::default();
+        for i in self.start..=self.end {
+            if let Chunk::Line(line) = &self.dialogue.chunks[i] {
+                if (s.len() > 0) {
+                    s.push('#');
                 }
-
-                if (ix > 0.0) {
-                    // HACKYYY just want to mutate a cstring gugh
-                    let mut tmp_string = CString::default();
-                    std::mem::swap(&mut tmp_string, &mut self.cur_string);
-                    for i in 0..(ix as isize) {
-                        unsafe {
-                            let raw = tmp_string.into_raw();
-                            *raw.offset(i) = ' ' as i8;
-                            tmp_string = CString::from_raw(raw);
-                        }
-                    }
-                    std::mem::swap(&mut tmp_string, &mut self.cur_string);
-                }
-
-                if (self.clear_t > CLEAR_T_MAX) {
-                    self.clear();
-                }
-
-                return;
-            }
-
-            const RATE : f32 = 0.75;
-            self.chars += dt_norm * RATE;
-
-            let cur_line = &self.dialogue.as_ref().unwrap().lines[self.cur_line_index];
-            if (self.chars < cur_line.line.len() as f32)
-            {
-                let substr = &(cur_line.line)[0..=self.chars.floor() as usize];
-                self.cur_string = CString::new(substr).unwrap();
-                return;
-            }
-            else
-            {
-                let lines_len = self.dialogue.as_ref().unwrap().lines.len();
-
-                if (self.cur_line_index + 1 < lines_len) {
-                    const NEXT_LINE_T_MAX : f32 = 15.0;
-                    if (self.next_line_t > NEXT_LINE_T_MAX) {
-                        self.cur_line_index += 1;
-                        self.next_line_t = 0.0;
-                        self.chars = 0.0;
-                    }
-                    else {
-                        self.next_line_t += 1.0;
-                        return;
-                    }
+                if i < self.end {
+                    s.push_str(line);
                 }
                 else {
-                    self.chars = cur_line.line.len() as f32;
-                    self.clear_t = 1.0;
+                    s.push_str(&line[0..self.line_i.min(line.len())]);
                 }
             }
-        } 
+        }
+
+        //println!("start {} end {} '{}'", self.start, self.end, s);
+        s
+    }
+
+    pub fn incr(&mut self) -> bool {
+        if (self.exhausted) {
+            false
+        }
+        else {
+            //println!("incr {} {}", self.end, self.line_i);
+            if (self.line_i >= self.dialogue.chunks[self.end].tick_len() as usize) {
+
+                if (self.end + 1 >= self.dialogue.chunks.len()) {
+                    self.exhausted = true;
+                    return false;
+                }
+
+                self.end += 1;
+                self.line_i = 0;
+
+                if let Chunk::Command(Command::Clear) = self.dialogue.chunks[self.end] {
+                    self.start = self.end;
+                }
+            }
+            else {
+                self.line_i += 1;
+            }
+
+            true
+        }
     }
 }

@@ -7,6 +7,7 @@ extern crate gms_binder;
 use gms_binder::*;
 
 mod dialogue;
+mod talker;
 
 use std::time::Instant;
 use std::os::raw::{c_char};
@@ -19,7 +20,7 @@ static mut GLOBAL_STATE : Option<GlobalState> = None;
 struct GlobalState
 {
     path : String,
-    talker : Talker,
+    talker : talker::Talker,
     cache : DialogueCache,
 }
 
