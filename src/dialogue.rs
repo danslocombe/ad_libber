@@ -75,6 +75,15 @@ pub struct Dialogue
 }
 
 impl Dialogue {
+    pub fn from_error(err : &str) -> Self {
+        Self {
+            name : "error".to_owned(),
+            filename : "error".to_owned(),
+            chunks : vec![
+                Chunk::Line(err.to_owned()),
+            ],
+        }
+    }
     fn name_eq(&self, other: &Self) -> bool {
         unicase::eq_ascii(&self.name, &other.name) && unicase::eq_ascii(&self.filename, &other.filename)
     }
@@ -184,8 +193,8 @@ impl DialogueCache {
         }
     }
 
-    pub fn get(&self, filename : &str) -> &DialogueFile {
-        self.cache.get(filename).unwrap()
+    pub fn get(&self, filename : &str) -> Option<&DialogueFile> {
+        self.cache.get(filename)
     }
 }
 
