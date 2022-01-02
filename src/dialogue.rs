@@ -3,15 +3,26 @@ use std::str::FromStr;
 
 #[derive(Clone, Debug)]
 pub enum Command {
+    AnnotationStart(Annotation),
+    AnnotationEnd(Annotation),
+    Speaker(String),
     Wait(u32),
     Clear,
+}
+
+fn is_command(input : &str, name : &str) -> bool {
+    unicase::eq_ascii(input, name) || unicase::eq_ascii(input, &name[0..1])
+}
+
+fn is_end_command(input : &str, name : &str) -> bool {
+    unicase::eq_ascii(input, &("/".to_owned() + name)) || unicase::eq_ascii(input, &("/".to_owned() + &name[0..1]))
 }
 
 impl Command {
     pub fn tick_len(&self) -> u32 {
         match *self {
             Command::Wait(delay) => delay,
-            Command::Clear => 0,
+            _ => 0,
         }
     }
 
@@ -19,10 +30,10 @@ impl Command {
         let mut splits = s.split_ascii_whitespace();
         let command = splits.next()?;
 
-        if (unicase::eq_ascii(command, "clear") || unicase::eq_ascii(command, "c")) {
+        if (is_command(command, "clear")) {
             Some(Self::Clear)
         }
-        else if (unicase::eq_ascii(command, "wait") || unicase::eq_ascii(command, "w")) {
+        else if (is_command(command, "wait")) {
 
             let dur : u32 = if let Some(t) = splits.next() {
                 let mut mult = 1.0;
@@ -45,6 +56,21 @@ impl Command {
 
             Some(Self::Wait(dur))
         }
+        else if (is_command(command, "speaker")) {
+            Some(Self::Speaker(splits.next().unwrap().to_owned()))
+        }
+        else if (is_command(command, "jiggle")) {
+            Some(Self::AnnotationStart(Annotation::Jiggly))
+        }
+        else if (is_end_command(command, "jiggle")) {
+            Some(Self::AnnotationEnd(Annotation::Jiggly))
+        }
+        else if (is_command(command, "wide")) {
+            Some(Self::AnnotationStart(Annotation::Wide))
+        }
+        else if (is_end_command(command, "wide")) {
+            Some(Self::AnnotationEnd(Annotation::Wide))
+        }
         else {
             None
         }
@@ -53,14 +79,16 @@ impl Command {
 
 #[derive(Clone, Debug)]
 pub enum Chunk {
-    Line(String),
+    Text(String),
+    Newline,
     Command(Command),
 }
 
 impl Chunk {
     pub fn tick_len(&self) -> u32 {
         match self {
-            Chunk::Line(s) => s.len() as u32,
+            Chunk::Text(s) => s.len() as u32,
+            Chunk::Newline => 1,
             Chunk::Command(c) => c.tick_len(),
         }
     }
@@ -80,7 +108,7 @@ impl Dialogue {
             name : "error".to_owned(),
             filename : "error".to_owned(),
             chunks : vec![
-                Chunk::Line(err.to_owned()),
+                Chunk::Text(err.to_owned()),
             ],
         }
     }
@@ -90,7 +118,7 @@ impl Dialogue {
 
     fn empty(&self) -> bool {
         for chunk in &self.chunks {
-            if let Chunk::Line(l) = chunk {
+            if let Chunk::Text(l) = chunk {
                 if (l.len() > 0) {
                     return false;
                 }
@@ -147,7 +175,24 @@ impl DialogueFile
             }
             else {
                 cur_section.as_mut().map(|x| {
-                    x.chunks.push(Chunk::Line(line.to_owned()));
+                    let mut splits = line.split_ascii_whitespace();
+                    let mut cur_str = String::new();
+                    while let Some(split) = splits.next() {
+                        if (split.starts_with("(")) {
+                            let command = Command::parse(&split[1..(split.len() - 1)]).expect(&format!("Could not parse command in line '{}' '{}'", line, split));
+                            x.chunks.push(Chunk::Text(cur_str));
+                            x.chunks.push(Chunk::Command(command));
+                            cur_str = String::new();
+                        }
+                        else {
+                            if (cur_str.len() > 0) {
+                                cur_str.push(' ');
+                            }
+                            cur_str.push_str(split);
+                        }
+                    }
+                    x.chunks.push(Chunk::Text(cur_str.to_owned()));
+                    x.chunks.push(Chunk::Newline);
                 });
             }
         }
@@ -198,6 +243,92 @@ impl DialogueCache {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Annotation {
+    Jiggly,
+    Wide,
+}
+
+#[derive(Clone, Debug)]
+pub struct SpanAnnotation
+{
+    start : usize,
+    end : usize,
+    pub annotations : Vec<Annotation>,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct AnnotatedString
+{
+    pub string : String,
+    pub annotations : Vec<SpanAnnotation>,
+}
+
+impl<'a> AnnotatedString {
+    pub fn iter(&'a self) -> AnnotatedStringIterator<'a> {
+        AnnotatedStringIterator {
+            annotated : self,
+            i: 0,
+        }
+    }
+}
+
+impl AnnotatedString {
+    pub fn owned_iter(self) -> OwnedAnnotatedStringIterator {
+        OwnedAnnotatedStringIterator {
+            annotated : self,
+            i: 0,
+        }
+    }
+}
+
+//pub struct AnnotatedStringIterator<'a> {
+pub struct AnnotatedStringIterator<'a> {
+    annotated : &'a AnnotatedString,
+    i : usize,
+}
+
+impl<'a> AnnotatedStringIterator<'a> {
+    pub fn next(&mut self) -> Option<(&str, &SpanAnnotation)> {
+        if self.i < self.annotated.annotations.len() {
+            let x = &self.annotated.annotations[self.i];
+
+            let substring = &self.annotated.string[x.start..x.end];
+            let annotations = &self.annotated.annotations[self.i];
+
+            self.i += 1;
+
+            Some((substring, annotations))
+        }
+        else {
+            None
+        }
+    }
+}
+
+pub struct OwnedAnnotatedStringIterator {
+    annotated : AnnotatedString,
+    i : usize,
+}
+
+impl OwnedAnnotatedStringIterator {
+    pub fn next(&mut self) -> Option<(&str, &SpanAnnotation)> {
+        if self.i < self.annotated.annotations.len() {
+            let x = &self.annotated.annotations[self.i];
+
+            let substring = &self.annotated.string[x.start..x.end];
+            let annotations = &self.annotated.annotations[self.i];
+
+            self.i += 1;
+
+            Some((substring, annotations))
+        }
+        else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DialogueCursor
 {
@@ -223,24 +354,60 @@ impl DialogueCursor {
         self.dialogue.name_eq(other)
     }
 
-    pub fn get(&self) -> String {
+    pub fn get(&self) -> AnnotatedString {
         let mut s = String::default();
+        let mut span_annotations = vec![];
+        let mut annotations : Vec<Annotation> = vec![];
+        let mut start = 0;
         for i in self.start..=self.end {
-            if let Chunk::Line(line) = &self.dialogue.chunks[i] {
-                if (s.len() > 0) {
+            match &self.dialogue.chunks[i] {
+                Chunk::Newline => {
                     s.push('#');
-                }
-                if i < self.end {
-                    s.push_str(line);
-                }
-                else {
-                    s.push_str(&line[0..self.line_i.min(line.len())]);
+                },
+                Chunk::Text(text) => {
+                    if i < self.end {
+                        s.push_str(text);
+                    }
+                    else {
+                        s.push_str(&text[0..self.line_i.min(text.len())]);
+                    }
+                },
+                Chunk::Command(command) => {
+                    span_annotations.push(SpanAnnotation {
+                        start,
+                        end : s.len(),
+                        annotations: annotations.clone(),
+                    });
+
+                    match command {
+                        Command::AnnotationStart(an) => {
+                            annotations.push(*an)
+                        },
+                        Command::AnnotationEnd(an) => {
+                            annotations = annotations.into_iter().filter(|x| *x != *an).collect();
+                        },
+                        _ => {},
+                    }
+
+                    if (s.len() > 0) {
+                        s.push(' ');
+                    }
+
+                    start = s.len();
                 }
             }
         }
 
-        //println!("start {} end {} '{}'", self.start, self.end, s);
-        s
+        span_annotations.push(SpanAnnotation {
+            start, 
+            end : s.len(),
+            annotations: annotations.clone(),
+        });
+
+        AnnotatedString {
+            string: s,
+            annotations : span_annotations, 
+        }
     }
 
     pub fn incr(&mut self) -> bool {

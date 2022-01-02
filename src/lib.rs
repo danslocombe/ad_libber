@@ -75,6 +75,7 @@ struct GlobalState
     talker : talker::Talker,
     cache : DialogueCache,
     one_shot_cache : HashSet<FilenameSectionPair>,
+    iter_wrapper : Option<IterWrapper>,
 }
 
 impl GlobalState
@@ -161,15 +162,13 @@ pub extern "C" fn queue_dialogue(input_raw: *const c_char) -> f64 {
         // input of the form "filename|section"
         let state = GLOBAL_STATE.as_mut().unwrap();
         let input = CStr::from_ptr(input_raw).to_str().unwrap();
-        //let splits : Vec<String> = input.split("|").map(|x| x.to_owned()).collect();
-        //let filename = String::from(&splits[0]) + ".adlib";
-        //state.queue(&filename, &splits[1]);
         let queue_args = QueueParams::parse(input).expect(&format!("Could not parse {} as queue input", input));
         state.queue(queue_args);
         0.0
     }
 }
 
+/*
 #[no_mangle]
 #[gms_bind]
 pub extern "C" fn get_string() -> *const c_char {
@@ -177,6 +176,100 @@ pub extern "C" fn get_string() -> *const c_char {
         GLOBAL_STATE.as_ref().unwrap().talker.current_ptr()
     }
 }
+*/
+
+struct IterWrapper { 
+    inner : OwnedAnnotatedStringIterator,
+    current_c_string : Option<CString>,
+    current_annotation : Option<SpanAnnotation>,
+}
+
+impl IterWrapper {
+    fn new(inner : OwnedAnnotatedStringIterator) -> Self {
+        IterWrapper {
+            inner,
+            current_annotation: None,
+            current_c_string: None,
+        }
+    }
+
+    fn move_next(&mut self) -> bool {
+        if let Some((x, y)) = self.inner.next() {
+            self.current_c_string = Some(CString::new(x).unwrap());
+            self.current_annotation = Some(y.clone());
+
+            true
+        }
+        else {
+            false
+        }
+    }
+}
+
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn reset_iterator() -> f64 {
+    unsafe {
+        let iter = GLOBAL_STATE.as_ref().unwrap().talker.current_string_iter();
+        GLOBAL_STATE.as_mut().unwrap().iter_wrapper = Some(IterWrapper::new(iter));
+        0.0
+    }
+}
+
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn move_iterator() -> f64 {
+    unsafe {
+        let iter = GLOBAL_STATE.as_mut().unwrap().iter_wrapper.as_mut().unwrap();
+        if (iter.move_next()) {
+            1.0
+        }
+        else {
+            0.0
+        }
+    }
+}
+
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn iterator_cur_string() -> *const c_char {
+    unsafe {
+        let iter = GLOBAL_STATE.as_ref().unwrap().iter_wrapper.as_ref().unwrap();
+        let ptr = iter.current_c_string.as_ref().unwrap().as_ptr();
+        ptr
+    }
+}
+
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn is_jiggly() -> f64 {
+    unsafe {
+        let iter = GLOBAL_STATE.as_ref().unwrap().iter_wrapper.as_ref().unwrap();
+        let annotations = &iter.current_annotation.as_ref().unwrap().annotations;
+        if (annotations.iter().any(|x| *x == Annotation::Jiggly)) {
+            1.0
+        }
+        else {
+            0.0
+        }
+    }
+}
+
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn is_wide() -> f64 {
+    unsafe {
+        let iter = GLOBAL_STATE.as_ref().unwrap().iter_wrapper.as_ref().unwrap();
+        let annotations = &iter.current_annotation.as_ref().unwrap().annotations;
+        if (annotations.iter().any(|x| *x == Annotation::Wide)) {
+            1.0
+        }
+        else {
+            0.0
+        }
+    }
+}
+
 
 #[no_mangle]
 #[gms_bind]

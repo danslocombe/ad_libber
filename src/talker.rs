@@ -10,7 +10,7 @@ const CLEAR_T_SUCK_MIN : f32 = 31.0;
 pub struct Talker
 {
     cursor : Option<DialogueCursor>,
-    cur_string : CString,
+    annotated_string : AnnotatedString,
 
     ////char_rate : f32, 
     t : f32,
@@ -35,13 +35,13 @@ impl Talker {
 
     pub fn clear(&mut self) {
         self.cursor = None;
-        self.cur_string = CString::default();
+        self.annotated_string = Default::default();
         self.t = 0.0;
         self.clear_t = 0.0;
     }
 
-    pub fn current_ptr(&self) -> *const c_char {
-        self.cur_string.as_ptr()
+    pub fn current_string_iter(&self) -> OwnedAnnotatedStringIterator {
+        self.annotated_string.clone().owned_iter()
     }
 
     pub fn tick(&mut self, dt_norm : f32) {
@@ -52,7 +52,7 @@ impl Talker {
         if (self.clear_t > 0.0) {
             self.clear_t += dt_norm;
             let cur_line = self.cursor.as_ref().unwrap().get();
-            let mut line_len = cur_line.len();
+            let mut line_len = cur_line.string.len();
 
             let mut ix = 0.0;
 
@@ -63,20 +63,20 @@ impl Talker {
                 ix = line_len as f32 * norm;
             }
 
-            self.cur_string = CString::new(cur_line).unwrap();
-            if (ix > 0.0) {
-                // HACKYYY just want to mutate a cstring gugh
-                let mut tmp_string = CString::default();
-                std::mem::swap(&mut tmp_string, &mut self.cur_string);
-                for i in 0..(ix as isize) {
-                    unsafe {
-                        let raw = tmp_string.into_raw();
-                        *raw.offset(i) = ' ' as i8;
-                        tmp_string = CString::from_raw(raw);
-                    }
-                }
-                std::mem::swap(&mut tmp_string, &mut self.cur_string);
-            }
+            //self.cur_string = CString::new(cur_line).unwrap();
+            //if (ix > 0.0) {
+            //    // HACKYYY just want to mutate a cstring gugh
+            //    let mut tmp_string = CString::default();
+            //    std::mem::swap(&mut tmp_string, &mut self.cur_string);
+            //    for i in 0..(ix as isize) {
+            //        unsafe {
+            //            let raw = tmp_string.into_raw();
+            //            *raw.offset(i) = ' ' as i8;
+            //            tmp_string = CString::from_raw(raw);
+            //        }
+            //    }
+            //    std::mem::swap(&mut tmp_string, &mut self.cur_string);
+            //}
 
             if (self.clear_t > CLEAR_T_MAX) {
                 self.clear();
@@ -96,6 +96,6 @@ impl Talker {
             }
         }
 
-        self.cur_string = CString::new(self.cursor.as_ref().unwrap().get()).unwrap();
+        self.annotated_string = self.cursor.as_ref().unwrap().get();
     }
 }
