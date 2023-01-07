@@ -7,6 +7,7 @@ extern crate gms_binder;
 mod dialogue;
 mod dialogue_engine;
 mod interop;
+mod talker;
 
 use std::os::raw::{c_char};
 use std::ffi::{CStr};

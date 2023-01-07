@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::str::Lines;
 use std::str::FromStr;
+
+use crate::talker::Talker;
 
 #[derive(Clone, Debug)]
 pub enum Command {
@@ -132,11 +135,107 @@ impl Dialogue {
 #[derive(Default, Clone, Debug)]
 pub struct DialogueFile
 {
+    talkers : Vec<Talker>,
     sections : Vec<Dialogue>,
+}
+
+impl<'a> DialogueFile {
+    fn parse_talker(lines : &mut Lines<'a>) -> (Option<&'a str>, Talker) {
+        let mut talker = Talker::default();
+
+        for line in lines {
+            if (line.is_empty() || line.starts_with("#")) {
+                continue;
+            }
+
+            if let Some((field, value)) = line.split_once('=') {
+                if unicase::eq_ascii(field, "sprite") {
+                    talker.sprite = value.trim().to_owned();
+                }
+                else if unicase::eq_ascii(field, "sound") {
+                    talker.sound = value.trim().to_owned();
+                }
+                else if unicase::eq_ascii(field, "rate") {
+                    talker.rate = Some(value.parse::<f32>().unwrap());
+                }
+            }
+
+            if (line.starts_with("[")) {
+                return (Some(line), talker);
+            }
+        }
+
+        (None, talker)
+    }
+
+    fn parse_section(lines : &mut Lines<'a>) -> (Option<&'a str>, Dialogue) {
+        for line in lines {
+            if (line.is_empty() || line.starts_with("#")) {
+                continue;
+            }
+
+            if (line.starts_with("[")) {
+                cur_section.take().map(|x| {
+                    if (!x.empty())
+                    {
+                        sections.push(x);
+                    }
+                });
+
+                let section_name = &line[1..line.len()-1];
+
+                if let Some((keyword, name)) = section_name.split_once(" ") {
+                    if (unicase::eq_ascii(keyword, "talker") {
+                        
+                    }
+                }
+                else {
+
+                }
+
+                eprintln!("Read Section: {}", section_name);
+
+                cur_section = Some(Dialogue {
+                    name: String::from(new_name),
+                    filename: p.to_owned(),
+                    chunks : vec![],
+                });
+            }
+            else if (line.starts_with("(")) {
+                let command = Command::parse(&line[1..(line.len() - 1)]).expect(&format!("Could not parse command {}", line));
+                eprintln!("parsed command: {:?}", command);
+                cur_section.as_mut().map(|x| {
+                    x.chunks.push(Chunk::Command(command));
+                });
+            }
+            else {
+                cur_section.as_mut().map(|x| {
+                    let mut splits = line.split_ascii_whitespace();
+                    let mut cur_str = String::new();
+                    while let Some(split) = splits.next() {
+                        if (split.starts_with("(")) {
+                            let command = Command::parse(&split[1..(split.len() - 1)]).expect(&format!("Could not parse command in line '{}' '{}'", line, split));
+                            x.chunks.push(Chunk::Text(cur_str));
+                            x.chunks.push(Chunk::Command(command));
+                            cur_str = String::new();
+                        }
+                        else {
+                            if (cur_str.len() > 0) {
+                                cur_str.push(' ');
+                            }
+                            cur_str.push_str(split);
+                        }
+                    }
+                    x.chunks.push(Chunk::Text(cur_str.to_owned()));
+                    x.chunks.push(Chunk::Newline);
+                });
+            }
+    }
 }
 
 impl DialogueFile
 {
+
     pub fn parse(p : &str) -> std::io::Result<Self> {
         eprintln!("Parsing: {}", p);
         let mut sections = vec![];
@@ -157,8 +256,18 @@ impl DialogueFile
                     }
                 });
 
-                let new_name = &line[1..line.len()-1];
-                eprintln!("Read Section: {}", new_name);
+                let section_name = &line[1..line.len()-1];
+
+                if let Some((keyword, name)) = section_name.split_once(" ") {
+                    if (unicase::eq_ascii(keyword, "talker") {
+                        
+                    }
+                }
+                else {
+
+                }
+
+                eprintln!("Read Section: {}", section_name);
 
                 cur_section = Some(Dialogue {
                     name: String::from(new_name),
