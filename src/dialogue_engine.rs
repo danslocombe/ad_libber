@@ -23,11 +23,10 @@ impl Default for DialogueEngineOptions
 #[derive(Default, Clone, Debug)]
 pub struct DialogueEngine
 {
-    options : DialogueEngineOptions,
+    pub options : DialogueEngineOptions,
     cursor : Option<DialogueCursor>,
     annotated_string : AnnotatedString,
 
-    ////char_rate : f32, 
     t : f32,
 
     line_linger_t : f32,

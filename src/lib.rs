@@ -151,4 +151,22 @@ pub extern "C" fn tick() -> f64 {
     }
 }
 
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn set_text_rate(rate : f64) -> f64 {
+    unsafe {
+        GLOBAL_STATE.as_mut().unwrap().engine.options.text_rate = rate as f32;
+        0.0
+    }
+}
+
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn set_line_linger_time(time : f64) -> f64 {
+    unsafe {
+        GLOBAL_STATE.as_mut().unwrap().engine.options.line_linger_time = time as f32;
+        0.0
+    }
+}
+
 gms_bind_end!();
