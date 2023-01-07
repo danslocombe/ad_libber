@@ -1,126 +1,24 @@
 #![allow(unused_parens)]
 
-//use std::os::raw::c_char;
-//use std::ffi::{CString};
 #[macro_use]
 extern crate gms_binder;
-use gms_binder::*;
+
 
 mod dialogue;
-mod talker;
+mod dialogue_engine;
+mod interop;
 
-use std::time::Instant;
 use std::os::raw::{c_char};
-use std::ffi::{CString, CStr};
-use dialogue::*;
-use std::collections::HashSet;
+use std::ffi::{CStr};
+
+use gms_binder::*;
+
+use dialogue::Annotation;
+use interop::global_state::GlobalState;
+use interop::queue_params::QueueParams;
+use interop::iter_wrapper::IterWrapper;
 
 static mut GLOBAL_STATE : Option<GlobalState> = None;
-
-struct QueueParams<'a>
-{
-    filename: &'a str,
-    section: &'a str,
-    oneshot: bool,
-}
-
-impl<'a> QueueParams<'a> {
-    pub fn parse(input : &'a str) -> Option<Self> {
-        let mut splits = input.split("|").map(|x| x);
-        let filename = splits.next()?;
-        let section = splits.next()?;
-        let mut oneshot = false;
-
-        while let Some(arg) = splits.next() {
-            if (unicase::eq_ascii(arg, "oneshot")) {
-                oneshot = true;
-            }
-        }
-
-        Some(Self {
-            filename,
-            section,
-            oneshot,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct FilenameSectionPair
-{
-    filename: String,
-    section : String,
-}
-
-impl PartialEq for FilenameSectionPair {
-    fn eq(&self, other : &Self) -> bool {
-        unicase::eq_ascii(&self.filename, &other.filename) && 
-            unicase::eq_ascii(&self.section, &other.section)
-    }
-}
-
-impl Eq for FilenameSectionPair {}
-
-impl std::hash::Hash for FilenameSectionPair {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.filename.to_ascii_lowercase().hash(state);
-        self.section.to_ascii_lowercase().hash(state);
-    }
-}
-
-#[derive(Default)]
-struct GlobalState
-{
-    path : String,
-    talker : talker::Talker,
-    cache : DialogueCache,
-    one_shot_cache : HashSet<FilenameSectionPair>,
-    iter_wrapper : Option<IterWrapper>,
-}
-
-impl GlobalState
-{
-    fn full_filename(&self, filename : &str) -> String {
-        self.path.clone() + filename + ".adlib"
-    }
-
-    fn preload(&mut self, filename : &str) {
-        self.cache.preload(&self.full_filename(filename));
-    }
-
-}
-
-impl<'a> GlobalState
-{
-    fn queue(&mut self, queue_args: QueueParams<'a>) {
-        self.preload(queue_args.filename);
-
-        if (queue_args.oneshot) {
-            let cache_key = FilenameSectionPair  {
-                filename: queue_args.filename.to_owned(),
-                section: queue_args.section.to_owned(),
-            };
-
-            if (!self.one_shot_cache.insert(cache_key))
-            {
-                return;
-            }
-        }
-
-        if let Some(dialogue_file) = self.cache.get(&self.full_filename(queue_args.filename)) {
-            if let Some(dialogue) = dialogue_file.get(queue_args.section) {
-                self.talker.queue(dialogue);
-            }
-            else {
-                self.talker.queue(&Dialogue::from_error(&format!("Could not find dialogue section {}", queue_args.section)));
-            }
-        }
-        else {
-            self.talker.queue(&Dialogue::from_error(&format!("Could not find dialogue file {}", queue_args.filename)));
-        }
-        //dialogue.get_section()
-    }
-}
 
 gms_bind_start!("ad_libber", "ad_libber.dll", "ad_lib");
 
@@ -173,44 +71,17 @@ pub extern "C" fn queue_dialogue(input_raw: *const c_char) -> f64 {
 #[gms_bind]
 pub extern "C" fn get_string() -> *const c_char {
     unsafe {
-        GLOBAL_STATE.as_ref().unwrap().talker.current_ptr()
+        GLOBAL_STATE.as_ref().unwrap().engine.current_ptr()
     }
 }
 */
 
-struct IterWrapper { 
-    inner : OwnedAnnotatedStringIterator,
-    current_c_string : Option<CString>,
-    current_annotation : Option<SpanAnnotation>,
-}
-
-impl IterWrapper {
-    fn new(inner : OwnedAnnotatedStringIterator) -> Self {
-        IterWrapper {
-            inner,
-            current_annotation: None,
-            current_c_string: None,
-        }
-    }
-
-    fn move_next(&mut self) -> bool {
-        if let Some((x, y)) = self.inner.next() {
-            self.current_c_string = Some(CString::new(x).unwrap());
-            self.current_annotation = Some(y.clone());
-
-            true
-        }
-        else {
-            false
-        }
-    }
-}
 
 #[no_mangle]
 #[gms_bind]
 pub extern "C" fn reset_iterator() -> f64 {
     unsafe {
-        let iter = GLOBAL_STATE.as_ref().unwrap().talker.current_string_iter();
+        let iter = GLOBAL_STATE.as_ref().unwrap().engine.current_string_iter();
         GLOBAL_STATE.as_mut().unwrap().iter_wrapper = Some(IterWrapper::new(iter));
         0.0
     }
@@ -275,7 +146,7 @@ pub extern "C" fn is_wide() -> f64 {
 #[gms_bind]
 pub extern "C" fn tick() -> f64 {
     unsafe {
-        GLOBAL_STATE.as_mut().unwrap().talker.tick(1.0);
+        GLOBAL_STATE.as_mut().unwrap().engine.tick(1.0);
         0.0
     }
 }

@@ -1,30 +1,45 @@
-use std::ffi::{CString, CStr};
-use std::os::raw::{c_char};
-
 use crate::dialogue::*;
 
-const CLEAR_T_MAX : f32 = 35.0;
-const CLEAR_T_SUCK_MIN : f32 = 31.0;
+//const CLEAR_T_MAX : f32 = 35.0;
+//const CLEAR_T_SUCK_MIN : f32 = 31.0;
+
+#[derive(Clone, Debug)]
+pub struct DialogueEngineOptions
+{
+    pub line_linger_time : f32,
+    pub text_rate : f32,
+}
+
+impl Default for DialogueEngineOptions
+{
+    fn default() -> Self {
+        Self {
+            line_linger_time : 240.0,
+            text_rate : 0.75,
+        }
+    }
+}
 
 #[derive(Default, Clone, Debug)]
-pub struct Talker
+pub struct DialogueEngine
 {
+    options : DialogueEngineOptions,
     cursor : Option<DialogueCursor>,
     annotated_string : AnnotatedString,
 
     ////char_rate : f32, 
     t : f32,
 
-    clear_t : f32,
+    line_linger_t : f32,
 }
 
-impl Talker {
+impl DialogueEngine {
     pub fn queue(&mut self, dialogue : &Dialogue) {
         if let Some(c) = self.cursor.as_ref() {
             if c.dialogue_name_eq(dialogue) {
                 // Already queued
                 // Reduce clear time
-                self.clear_t /= 2.0;
+                self.line_linger_t /= 2.0;
                 return;
             }
         }
@@ -37,7 +52,7 @@ impl Talker {
         self.cursor = None;
         self.annotated_string = Default::default();
         self.t = 0.0;
-        self.clear_t = 0.0;
+        self.line_linger_t = 0.0;
     }
 
     pub fn current_string_iter(&self) -> OwnedAnnotatedStringIterator {
@@ -49,49 +64,36 @@ impl Talker {
             return;
         }
 
-        if (self.clear_t > 0.0) {
-            self.clear_t += dt_norm;
+        if (self.line_linger_t > 0.0) {
+            self.line_linger_t += dt_norm;
+            /*
             let cur_line = self.cursor.as_ref().unwrap().get();
             let mut line_len = cur_line.string.len();
 
             let mut ix = 0.0;
 
-            if (self.clear_t > CLEAR_T_SUCK_MIN) {
-                let norm = ((self.clear_t - CLEAR_T_SUCK_MIN) / (CLEAR_T_MAX-CLEAR_T_SUCK_MIN))
+            if (self.line_linger_t > CLEAR_T_SUCK_MIN) {
+                let norm = ((self.line_linger_t - CLEAR_T_SUCK_MIN) / (CLEAR_T_MAX-CLEAR_T_SUCK_MIN))
                     .clamp(0.0, 1.0);
 
                 ix = line_len as f32 * norm;
             }
+            */
 
-            //self.cur_string = CString::new(cur_line).unwrap();
-            //if (ix > 0.0) {
-            //    // HACKYYY just want to mutate a cstring gugh
-            //    let mut tmp_string = CString::default();
-            //    std::mem::swap(&mut tmp_string, &mut self.cur_string);
-            //    for i in 0..(ix as isize) {
-            //        unsafe {
-            //            let raw = tmp_string.into_raw();
-            //            *raw.offset(i) = ' ' as i8;
-            //            tmp_string = CString::from_raw(raw);
-            //        }
-            //    }
-            //    std::mem::swap(&mut tmp_string, &mut self.cur_string);
-            //}
-
-            if (self.clear_t > CLEAR_T_MAX) {
+            if (self.line_linger_t > self.options.line_linger_time) {
                 self.clear();
             }
 
             return;
         }
 
-        const RATE : f32 = 0.75;
-        self.t += dt_norm * RATE;
+        self.t += dt_norm;
 
-        while (self.t > 1.0) {
-            self.t -= 1.0;
+        while (self.t > self.options.text_rate) {
+            self.t -= self.options.text_rate;
             if (!self.cursor.as_mut().unwrap().incr()) {
-                self.clear_t = 1.0;
+                // Bit hacky set to one second
+                self.line_linger_t = 1.0;
                 break;
             }
         }

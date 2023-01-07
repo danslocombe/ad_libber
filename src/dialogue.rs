@@ -282,7 +282,6 @@ impl AnnotatedString {
     }
 }
 
-//pub struct AnnotatedStringIterator<'a> {
 pub struct AnnotatedStringIterator<'a> {
     annotated : &'a AnnotatedString,
     i : usize,
@@ -306,6 +305,7 @@ impl<'a> AnnotatedStringIterator<'a> {
     }
 }
 
+#[derive(Default)]
 pub struct OwnedAnnotatedStringIterator {
     annotated : AnnotatedString,
     i : usize,
