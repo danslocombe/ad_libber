@@ -170,4 +170,13 @@ pub extern "C" fn set_line_linger_time(time : f64) -> f64 {
     }
 }
 
+#[no_mangle]
+#[gms_bind]
+pub extern "C" fn get_current_sprite() -> *const c_char {
+    unsafe {
+        todo!()
+        //GLOBAL_STATE.as_mut().unwrap().engine.
+    }
+}
+
 gms_bind_end!();

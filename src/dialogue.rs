@@ -81,8 +81,14 @@ impl Command {
 }
 
 #[derive(Clone, Debug)]
+pub struct TextChunk {
+    text: String,
+    talker_id : Option<u32>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Chunk {
-    Text(String),
+    Text(TextChunk),
     Newline,
     Command(Command),
 }
@@ -90,7 +96,7 @@ pub enum Chunk {
 impl Chunk {
     pub fn tick_len(&self) -> u32 {
         match self {
-            Chunk::Text(s) => s.len() as u32,
+            Chunk::Text(s) => s.text.len() as u32,
             Chunk::Newline => 1,
             Chunk::Command(c) => c.tick_len(),
         }
@@ -111,7 +117,7 @@ impl Dialogue {
             name : "error".to_owned(),
             filename : "error".to_owned(),
             chunks : vec![
-                Chunk::Text(err.to_owned()),
+                Chunk::Text(TextChunk{ text: err.to_owned(), talker_id: None}),
             ],
         }
     }
@@ -122,7 +128,7 @@ impl Dialogue {
     fn empty(&self) -> bool {
         for chunk in &self.chunks {
             if let Chunk::Text(l) = chunk {
-                if (l.len() > 0) {
+                if (l.text.len() > 0) {
                     return false;
                 }
             }
@@ -175,7 +181,7 @@ impl<'a> DialogueFile {
         talker
     }
 
-    fn parse_section(filename : &str, name : &str, lines : &[&'a str], i : &mut usize) -> Dialogue {
+    fn parse_section(talkers : &[Talker], filename : &str, name : &str, lines : &[&'a str], i : &mut usize) -> Dialogue {
         let mut section = Dialogue { name : name.to_owned(), filename : filename.to_owned(), chunks: Default::default() };
 
         while *i < lines.len() {
@@ -188,18 +194,31 @@ impl<'a> DialogueFile {
             if (line.starts_with("[")) {
                 break;
             }
-            else if (line.starts_with("(")) {
+            // TODO this line is a hack, collapse this case
+            else if (line.starts_with("(") && line.ends_with(")") && !line.contains("/")) {
                 let command = Command::parse(&line[1..(line.len() - 1)]).expect(&format!("Could not parse command {}", line));
                 eprintln!("parsed command: {:?}", command);
                 section.chunks.push(Chunk::Command(command));
             }
             else {
-                let mut splits = line.split_ascii_whitespace();
+                let mut line_to_parse = line;
+                let mut talker_id : Option<u32> = None;
+
+                if let Some((talker_name_raw, rest)) = line.split_once("|") {
+                    let talker_name = talker_name_raw.trim();
+                    talker_id = talkers.iter().enumerate().filter(|(_, x)| unicase::eq_ascii(&x.name[..], talker_name)).map(|(i, _)| i as u32).next();
+                    line_to_parse = rest.trim();
+                }
+
+                let mut splits = line_to_parse.split_ascii_whitespace();
                 let mut cur_str = String::new();
                 while let Some(split) = splits.next() {
                     if (split.starts_with("(")) {
                         let command = Command::parse(&split[1..(split.len() - 1)]).expect(&format!("Could not parse command in line '{}' '{}'", line, split));
-                        section.chunks.push(Chunk::Text(cur_str));
+                        section.chunks.push(Chunk::Text(TextChunk {
+                            text: cur_str,
+                            talker_id,
+                        }));
                         section.chunks.push(Chunk::Command(command));
                         cur_str = String::new();
                     }
@@ -210,7 +229,10 @@ impl<'a> DialogueFile {
                         cur_str.push_str(split);
                     }
                 }
-                section.chunks.push(Chunk::Text(cur_str.to_owned()));
+                section.chunks.push(Chunk::Text(TextChunk {
+                    text: cur_str.to_owned(),
+                    talker_id,
+                }));
                 section.chunks.push(Chunk::Newline);
             }
 
@@ -225,13 +247,15 @@ impl DialogueFile
 {
 
     pub fn parse(p : &str) -> std::io::Result<Self> {
-        eprintln!("Parsing: {}", p);
+        let contents = std::fs::read_to_string(p)?;
+        Ok(Self::parse_contents(p, &contents))
+    }
+
+    pub fn parse_contents(filename : &str, contents : &str) -> Self {
+        eprintln!("Parsing: {}", filename);
         let mut sections = vec![];
         let mut talkers = vec![];
-        let mut cur_section : Option<Dialogue> = None;
-
-        let read = std::fs::read_to_string(p)?;
-        let lines = read.lines().collect::<Vec<_>>();
+        let lines = contents.lines().collect::<Vec<_>>();
 
         let mut i = 0;
         while i < lines.len() {
@@ -242,41 +266,30 @@ impl DialogueFile
             }
 
             if (line.starts_with("[")) {
-                cur_section.take().map(|x| {
-                    if (!x.empty())
-                    {
-                        sections.push(x);
-                    }
-                });
-
                 let section_name = &line[1..line.len()-1];
+
+                i += 1;
 
                 if let Some((keyword, name)) = section_name.split_once(" ") {
                     if (unicase::eq_ascii(keyword, "talker")) {
+                        eprintln!("Read talker: {}", name);
                         talkers.push(Self::parse_talker(name, &lines, &mut i));
+                        eprintln!("{:?}", talkers.last());
                         continue;
                     }
                 }
 
-                let section = Self::parse_section(p, section_name, &lines, &mut i);
-
                 eprintln!("Read Section: {}", section_name);
-
-                cur_section = Some(section);
+                let section = Self::parse_section(&talkers, filename, section_name, &lines, &mut i);
+                eprintln!("{:?}", section);
+                sections.push(section);
             }
         }
 
-        cur_section.take().map(|x| {
-            if (!x.empty())
-            {
-                sections.push(x);
-            }
-        });
-        
-        Ok(Self {
+        Self {
             talkers,
             sections,
-        })
+        }
     }
 
     pub fn get(&self, section_name : &str) -> Option<&Dialogue> {
@@ -436,10 +449,10 @@ impl DialogueCursor {
                 },
                 Chunk::Text(text) => {
                     if i < self.end {
-                        s.push_str(text);
+                        s.push_str(&text.text);
                     }
                     else {
-                        s.push_str(&text[0..self.line_i.min(text.len())]);
+                        s.push_str(&text.text[0..self.line_i.min(text.text.len())]);
                     }
                 },
                 Chunk::Command(command) => {
@@ -506,5 +519,29 @@ impl DialogueCursor {
 
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn test_parse()
+    {
+        let parsed = DialogueFile::parse_contents("test", "[talker goose]
+sprite = spr_goose
+sound = snd_goose
+
+# comment
+
+[intro]
+goose | hello there
+(wait 100ms)
+goose | (j) toad (/j)");
+
+        println!("{:#?}", parsed);
+        assert!(false);
     }
 }

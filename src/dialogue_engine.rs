@@ -86,10 +86,10 @@ impl DialogueEngine {
             return;
         }
 
-        self.t += dt_norm;
+        self.t += dt_norm * self.options.text_rate;
 
-        while (self.t > self.options.text_rate) {
-            self.t -= self.options.text_rate;
+        while (self.t > 1.0) {
+            self.t -= 1.0;
             if (!self.cursor.as_mut().unwrap().incr()) {
                 // Bit hacky set to one second
                 self.line_linger_t = 1.0;

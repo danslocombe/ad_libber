@@ -50,11 +50,11 @@ impl<'a> GlobalState
                 self.engine.queue(dialogue);
             }
             else {
-                self.engine.queue(&Dialogue::from_error(&format!("Could not find dialogue section {}", queue_args.section)));
+                self.engine.queue(&Dialogue::from_error(&format!("No section {}", queue_args.section)));
             }
         }
         else {
-            self.engine.queue(&Dialogue::from_error(&format!("Could not find dialogue file {}", queue_args.filename)));
+            self.engine.queue(&Dialogue::from_error(&format!("No file {}", queue_args.filename)));
         }
     }
 }
