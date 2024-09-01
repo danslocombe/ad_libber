@@ -60,7 +60,7 @@ impl Command {
             Some(Self::Wait(dur))
         }
         else if (is_command(command, "speaker")) {
-            Some(Self::Speaker(splits.next().unwrap().to_owned()))
+            Some(Self::Speaker(splits.next().expect("Could not parse speaker").to_owned()))
         }
         else if (is_command(command, "jiggle")) {
             Some(Self::AnnotationStart(Annotation::Jiggly))
@@ -141,8 +141,8 @@ impl Dialogue {
 #[derive(Default, Clone, Debug)]
 pub struct DialogueFile
 {
-    talkers : Vec<Talker>,
-    sections : Vec<Dialogue>,
+    pub talkers : Vec<Talker>,
+    pub sections : Vec<Dialogue>,
 }
 
 impl<'a> DialogueFile {
@@ -171,7 +171,7 @@ impl<'a> DialogueFile {
                     talker.sound = value.trim().to_owned();
                 }
                 else if unicase::eq_ascii(field, "rate") {
-                    talker.rate = Some(value.parse::<f32>().unwrap());
+                    talker.rate = Some(value.parse::<f32>().expect("Could not parse rate"));
                 }
             }
 
@@ -316,7 +316,7 @@ impl DialogueCache {
             // Already loaded.
         }
         else {
-            let dialogue = DialogueFile::parse(filename).unwrap();
+            let dialogue = DialogueFile::parse(filename).expect("Could not parse file in DialogueCache");
             self.cache.insert(filename.to_owned(), dialogue);
         }
     }
