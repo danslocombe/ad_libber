@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::str::Lines;
 use std::str::FromStr;
 
 use crate::talker::Talker;
@@ -83,6 +82,7 @@ impl Command {
 #[derive(Clone, Debug)]
 pub struct TextChunk {
     text: String,
+    #[allow(unused)]
     talker_id : Option<u32>,
 }
 
@@ -125,6 +125,7 @@ impl Dialogue {
         unicase::eq_ascii(&self.name, &other.name) && unicase::eq_ascii(&self.filename, &other.filename)
     }
 
+    /*
     fn empty(&self) -> bool {
         for chunk in &self.chunks {
             if let Chunk::Text(l) = chunk {
@@ -136,6 +137,7 @@ impl Dialogue {
 
         true
     }
+    */
 }
 
 #[derive(Default, Clone, Debug)]

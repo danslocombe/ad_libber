@@ -5,11 +5,6 @@ pub mod dialogue_engine;
 pub mod interop;
 pub mod talker;
 
-use dialogue::Annotation;
-use interop::global_state::GlobalState;
-use interop::queue_params::QueueParams;
-use interop::iter_wrapper::IterWrapper;
-
 #[cfg(feature = "gms")]
 pub mod gms {
     use std::os::raw::{c_char};
