@@ -5,6 +5,7 @@ pub mod dialogue_engine;
 pub mod interop;
 pub mod talker;
 
+/*
 #[cfg(feature = "gms")]
 pub mod gms {
     use std::os::raw::{c_char};
@@ -177,3 +178,4 @@ pub mod gms {
 
     gms_bind_end!();
 }
+    */

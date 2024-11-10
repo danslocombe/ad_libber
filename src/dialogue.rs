@@ -5,19 +5,40 @@ use crate::talker::Talker;
 
 #[derive(Clone, Debug)]
 pub enum Command {
-    AnnotationStart(Annotation),
-    AnnotationEnd(Annotation),
+    //AnnotationStart(Annotation),
+    //AnnotationEnd(Annotation),
     Speaker(String),
     Wait(u32),
     Clear,
+    SetStyling(Styling),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Styling {
+    pub wavy: bool,
+    pub jitter: bool,
+    pub wide: bool,
+    //rainbow: bool,
+    //color: 
+    //font_type: 
+}
+
+impl Default for Styling {
+    fn default() -> Self {
+        Styling {
+            wavy: false,
+            jitter: false,
+            wide: false,
+        }
+    }
 }
 
 fn is_command(input : &str, name : &str) -> bool {
-    unicase::eq_ascii(input, name) || unicase::eq_ascii(input, &name[0..1])
+    unicase::eq_ascii(input, name)// || unicase::eq_ascii(input, &name[0..1])
 }
 
 fn is_end_command(input : &str, name : &str) -> bool {
-    unicase::eq_ascii(input, &("/".to_owned() + name)) || unicase::eq_ascii(input, &("/".to_owned() + &name[0..1]))
+    unicase::eq_ascii(input, &("/".to_owned() + name))// || unicase::eq_ascii(input, &("/".to_owned() + &name[0..1]))
 }
 
 impl Command {
@@ -28,8 +49,8 @@ impl Command {
         }
     }
 
-    pub fn parse(s : &str) -> Option<Self> {
-        let mut splits = s.split_ascii_whitespace();
+    pub fn try_parse(command_full : &str) -> Option<Self> {
+        let mut splits = command_full.split_ascii_whitespace();
         let command = splits.next()?;
 
         if (is_command(command, "clear")) {
@@ -61,17 +82,20 @@ impl Command {
         else if (is_command(command, "speaker")) {
             Some(Self::Speaker(splits.next().expect("Could not parse speaker").to_owned()))
         }
-        else if (is_command(command, "jiggle")) {
-            Some(Self::AnnotationStart(Annotation::Jiggly))
-        }
-        else if (is_end_command(command, "jiggle")) {
-            Some(Self::AnnotationEnd(Annotation::Jiggly))
-        }
-        else if (is_command(command, "wide")) {
-            Some(Self::AnnotationStart(Annotation::Wide))
-        }
-        else if (is_end_command(command, "wide")) {
-            Some(Self::AnnotationEnd(Annotation::Wide))
+        else if (is_command(command, "style")) {
+            let mut style = Styling::default();
+            for split in splits {
+                if (unicase::eq_ascii("wavy", split)) {
+                    style.wavy = true;
+                }
+                else if (unicase::eq_ascii("jitter", split)) {
+                    style.jitter = true;
+                }
+                else if (unicase::eq_ascii("wide", split)) {
+                    style.wide = true;
+                }
+            }
+            Some(Self::SetStyling(style))
         }
         else {
             None
@@ -82,8 +106,8 @@ impl Command {
 #[derive(Clone, Debug)]
 pub struct TextChunk {
     text: String,
-    #[allow(unused)]
-    talker_id : Option<u32>,
+    //#[allow(unused)]
+    //talker_id : Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,7 +141,7 @@ impl Dialogue {
             name : "error".to_owned(),
             filename : "error".to_owned(),
             chunks : vec![
-                Chunk::Text(TextChunk{ text: err.to_owned(), talker_id: None}),
+                Chunk::Text(TextChunk{ text: err.to_owned()}),
             ],
         }
     }
@@ -143,11 +167,12 @@ impl Dialogue {
 #[derive(Default, Clone, Debug)]
 pub struct DialogueFile
 {
-    pub talkers : Vec<Talker>,
+    //pub talkers : Vec<Talker>,
     pub sections : Vec<Dialogue>,
 }
 
 impl<'a> DialogueFile {
+    /*
     fn parse_talker(name : &str, lines : &[&'a str], i : &mut usize) -> Talker {
         let mut talker = Talker {
             name : name.to_owned(),
@@ -182,13 +207,14 @@ impl<'a> DialogueFile {
 
         talker
     }
+    */
 
-    fn parse_section(talkers : &[Talker], filename : &str, name : &str, lines : &[&'a str], i : &mut usize) -> Dialogue {
+    fn parse_section(filename : &str, name : &str, lines : &[&'a str], i : &mut usize) -> Dialogue {
         let mut section = Dialogue { name : name.to_owned(), filename : filename.to_owned(), chunks: Default::default() };
 
         while *i < lines.len() {
             let line = lines[*i];
-            if (line.is_empty() || line.starts_with("#")) {
+            if (line.starts_with("#")) {
                 *i += 1;
                 continue;
             }
@@ -196,58 +222,89 @@ impl<'a> DialogueFile {
             if (line.starts_with("[")) {
                 break;
             }
-            // TODO this line is a hack, collapse this case
-            else if (line.starts_with("(") && line.ends_with(")") && !line.contains("/")) {
-                let command = Command::parse(&line[1..(line.len() - 1)]).expect(&format!("Could not parse command {}", line));
-                eprintln!("parsed command: {:?}", command);
-                section.chunks.push(Chunk::Command(command));
-            }
-            else {
-                let mut line_to_parse = line;
-                let mut talker_id : Option<u32> = None;
-
-                if let Some((talker_name_raw, rest)) = line.split_once("|") {
-                    let talker_name = talker_name_raw.trim();
-                    talker_id = talkers.iter().enumerate().filter(|(_, x)| unicase::eq_ascii(&x.name[..], talker_name)).map(|(i, _)| i as u32).next();
-                    line_to_parse = rest.trim();
-                }
-
-                let mut splits = line_to_parse.split_ascii_whitespace();
-                let mut cur_str = String::new();
-                while let Some(split) = splits.next() {
-                    if (split.starts_with("(")) {
-                        let command = Command::parse(&split[1..(split.len() - 1)]).expect(&format!("Could not parse command in line '{}' '{}'", line, split));
-                        section.chunks.push(Chunk::Text(TextChunk {
-                            text: cur_str,
-                            talker_id,
-                        }));
-                        section.chunks.push(Chunk::Command(command));
-                        cur_str = String::new();
-                    }
-                    else {
-                        if (cur_str.len() > 0) {
-                            cur_str.push(' ');
-                        }
-                        cur_str.push_str(split);
-                    }
-                }
-                section.chunks.push(Chunk::Text(TextChunk {
-                    text: cur_str.to_owned(),
-                    talker_id,
-                }));
-                section.chunks.push(Chunk::Newline);
-            }
 
             *i += 1;
+
+            let mut added_text = false;
+
+            let mut l_i: usize = 0;
+
+            while let Some(open_pos_local) = (line[l_i..].find('(')) {
+                let open_pos = open_pos_local + l_i;
+                let mut end_pos = line.len();
+
+                if let Some(close_pos_local) = line[open_pos..].find(')') {
+                    end_pos = close_pos_local + open_pos;
+                }
+
+                if (end_pos - open_pos > 0) {
+                    let command_str = &line[open_pos + 1 .. (end_pos)];
+
+                    if let Some(command) = Command::try_parse(command_str) {
+                        let ret = Self::make_add_text_chunk(&line[l_i..open_pos], &mut section.chunks);
+                        added_text |= ret;
+                        section.chunks.push(Chunk::Command(command));
+                    }
+                }
+
+                l_i = end_pos + 1;
+            }
+
+            let ret = Self::make_add_text_chunk(&line[l_i..], &mut section.chunks);
+            added_text |= ret;
+
+            if (added_text) {
+                // Only add a newline if one of the above actually added text to be displayed.
+                // This handles the case where we have a line that is entirely a command.
+                section.chunks.push(Chunk::Newline);
+            }
         }
 
         section
     }
+
+    fn make_add_text_chunk(text: &str, chunks: &mut Vec<Chunk>) -> bool {
+        let normalize_whitespace = true;
+        let s = if (normalize_whitespace) {
+            text.trim()
+         } else {
+            text
+         };
+
+        if (s.len() == 0) {
+            return false;
+        }
+
+        if (normalize_whitespace) {
+            let mut has_a_previous_text_chunk_since_linebreak = false;
+            for c in chunks.iter() {
+                if let Chunk::Text(tc) = c {
+                    has_a_previous_text_chunk_since_linebreak = true;
+                }
+
+                if let Chunk::Newline = c {
+                    has_a_previous_text_chunk_since_linebreak = false;
+                }
+            }
+
+            if (has_a_previous_text_chunk_since_linebreak) {
+                chunks.push(Chunk::Text(TextChunk {
+                    text: " ".to_owned(),
+                }));
+            }
+        }
+
+        chunks.push(Chunk::Text(TextChunk {
+            text: s.to_owned(),
+        }));
+
+        return true;
+    }
 }
+
 
 impl DialogueFile
 {
-
     pub fn parse(p : &str) -> std::io::Result<Self> {
         let contents = std::fs::read_to_string(p)?;
         Ok(Self::parse_contents(p, &contents))
@@ -256,7 +313,6 @@ impl DialogueFile
     pub fn parse_contents(filename : &str, contents : &str) -> Self {
         eprintln!("Parsing: {}", filename);
         let mut sections = vec![];
-        let mut talkers = vec![];
         let lines = contents.lines().collect::<Vec<_>>();
 
         let mut i = 0;
@@ -272,6 +328,7 @@ impl DialogueFile
 
                 i += 1;
 
+                /*
                 if let Some((keyword, name)) = section_name.split_once(" ") {
                     if (unicase::eq_ascii(keyword, "talker")) {
                         eprintln!("Read talker: {}", name);
@@ -280,16 +337,19 @@ impl DialogueFile
                         continue;
                     }
                 }
+                */
 
                 eprintln!("Read Section: {}", section_name);
-                let section = Self::parse_section(&talkers, filename, section_name, &lines, &mut i);
+                let section = Self::parse_section(filename, section_name, &lines, &mut i);
                 eprintln!("{:?}", section);
                 sections.push(section);
+            }
+            else {
+                i += 1;
             }
         }
 
         Self {
-            talkers,
             sections,
         }
     }
@@ -328,199 +388,183 @@ impl DialogueCache {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Annotation {
-    Jiggly,
-    Wide,
+pub enum TickResult {
+    Char(char),
+    Newline,
+    Wait,
+    Clear,
+    Done,
+    Noop,
+    SetStyling(Styling),
 }
 
-#[derive(Clone, Debug)]
-pub struct SpanAnnotation
-{
-    start : usize,
-    end : usize,
-    pub annotations : Vec<Annotation>,
-}
+pub struct DialogueCursor {
+    index: usize,
 
-#[derive(Default, Clone, Debug)]
-pub struct AnnotatedString
-{
-    pub string : String,
-    pub annotations : Vec<SpanAnnotation>,
-}
-
-impl<'a> AnnotatedString {
-    pub fn iter(&'a self) -> AnnotatedStringIterator<'a> {
-        AnnotatedStringIterator {
-            annotated : self,
-            i: 0,
-        }
-    }
-}
-
-impl AnnotatedString {
-    pub fn owned_iter(self) -> OwnedAnnotatedStringIterator {
-        OwnedAnnotatedStringIterator {
-            annotated : self,
-            i: 0,
-        }
-    }
-}
-
-pub struct AnnotatedStringIterator<'a> {
-    annotated : &'a AnnotatedString,
-    i : usize,
-}
-
-impl<'a> AnnotatedStringIterator<'a> {
-    pub fn next(&mut self) -> Option<(&str, &SpanAnnotation)> {
-        if self.i < self.annotated.annotations.len() {
-            let x = &self.annotated.annotations[self.i];
-
-            let substring = &self.annotated.string[x.start..x.end];
-            let annotations = &self.annotated.annotations[self.i];
-
-            self.i += 1;
-
-            Some((substring, annotations))
-        }
-        else {
-            None
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct OwnedAnnotatedStringIterator {
-    annotated : AnnotatedString,
-    i : usize,
-}
-
-impl OwnedAnnotatedStringIterator {
-    pub fn next(&mut self) -> Option<(&str, &SpanAnnotation)> {
-        if self.i < self.annotated.annotations.len() {
-            let x = &self.annotated.annotations[self.i];
-
-            let substring = &self.annotated.string[x.start..x.end];
-            let annotations = &self.annotated.annotations[self.i];
-
-            self.i += 1;
-
-            Some((substring, annotations))
-        }
-        else {
-            None
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DialogueCursor
-{
-    dialogue : Dialogue,
-    start : usize,
-    end : usize,
-    line_i : usize,
-    exhausted : bool,
+    i: usize,
+    line: usize,
+    exhausted: bool,
 }
 
 impl DialogueCursor {
-    pub fn new(dialogue : &Dialogue) -> Self {
+    pub fn new(index: usize) -> Self {
         Self {
-            dialogue : dialogue.clone(),
-            start : 0,
-            end : 0,
-            line_i : 0,
+            index,
+            i: 0,
+            line: 0,
             exhausted: false,
         }
     }
+}
 
-    pub fn dialogue_name_eq(&self, other: &Dialogue) -> bool {
-        self.dialogue.name_eq(other)
-    }
+struct PeekResult<'a> {
+    section: Option<&'a Dialogue>,
+    chunk: Option<&'a Chunk>,
+    set_exhausted: bool,
+}
 
-    pub fn get(&self) -> AnnotatedString {
-        let mut s = String::default();
-        let mut span_annotations = vec![];
-        let mut annotations : Vec<Annotation> = vec![];
-        let mut start = 0;
-        for i in self.start..=self.end {
-            match &self.dialogue.chunks[i] {
-                Chunk::Newline => {
-                    s.push('#');
-                },
-                Chunk::Text(text) => {
-                    if i < self.end {
-                        s.push_str(&text.text);
-                    }
-                    else {
-                        s.push_str(&text.text[0..self.line_i.min(text.text.len())]);
-                    }
-                },
-                Chunk::Command(command) => {
-                    span_annotations.push(SpanAnnotation {
-                        start,
-                        end : s.len(),
-                        annotations: annotations.clone(),
-                    });
-
-                    match command {
-                        Command::AnnotationStart(an) => {
-                            annotations.push(*an)
-                        },
-                        Command::AnnotationEnd(an) => {
-                            annotations = annotations.into_iter().filter(|x| *x != *an).collect();
-                        },
-                        _ => {},
-                    }
-
-                    if (s.len() > 0) {
-                        s.push(' ');
-                    }
-
-                    start = s.len();
-                }
-            }
-        }
-
-        span_annotations.push(SpanAnnotation {
-            start, 
-            end : s.len(),
-            annotations: annotations.clone(),
-        });
-
-        AnnotatedString {
-            string: s,
-            annotations : span_annotations, 
+impl<'a> Default for PeekResult<'a> {
+    fn default() -> Self {
+        Self {
+            section: None,
+            chunk: None,
+            set_exhausted: false,
         }
     }
+}
 
-    pub fn incr(&mut self) -> bool {
+impl<'a> DialogueCursor {
+    pub fn peek_chunk(&self, file: &'a DialogueFile) -> PeekResult<'a> {
         if (self.exhausted) {
-            false
+            return PeekResult::default();
         }
-        else {
-            //println!("incr {} {}", self.end, self.line_i);
-            if (self.line_i >= self.dialogue.chunks[self.end].tick_len() as usize) {
 
-                if (self.end + 1 >= self.dialogue.chunks.len()) {
-                    self.exhausted = true;
-                    return false;
-                }
+        if (self.index >= file.sections.len()) {
+            return PeekResult {
+                set_exhausted: true,
+                ..Default::default()
+            };
+        }
 
-                self.end += 1;
-                self.line_i = 0;
+        let section = &file.sections[self.index];
 
-                if let Chunk::Command(Command::Clear) = self.dialogue.chunks[self.end] {
-                    self.start = self.end;
+        if (self.line >= section.chunks.len()) {
+            return PeekResult {
+                set_exhausted: true,
+                ..Default::default()
+            };
+        }
+
+        let chunk = &section.chunks[self.line];
+
+        PeekResult {
+            section: Some(section),
+            chunk: Some(chunk),
+            set_exhausted: false,
+        }
+    }
+}
+
+impl DialogueCursor {
+    pub fn tick_time(&mut self, file: &DialogueFile, base_text_rate: f32) -> f32 {
+        let peeked = self.peek_chunk(file);
+        if let Some(chunk) = peeked.chunk {
+            if let Chunk::Command(command) = &chunk {
+                if let Command::Wait(wait_ms) = &command {
+                    return *wait_ms as f32 * 60.0 / 1000.0;
                 }
             }
             else {
-                self.line_i += 1;
+                return base_text_rate;
+            }
+        }
+
+        return 0.0;
+    }
+
+
+    pub fn incr(&mut self, file: &DialogueFile, keypress: bool, click: bool) -> TickResult {
+        let peeked = self.peek_chunk(file);
+        if (peeked.chunk.is_none()) {
+            if (peeked.set_exhausted) {
+                self.exhausted = true;
             }
 
-            true
+            return TickResult::Done;
         }
+
+        let chunk = peeked.chunk.unwrap();
+
+        match (chunk) {
+            Chunk::Text(tc) => {
+                assert!(self.i < tc.text.len());
+
+                let c = tc.text.chars().nth(self.i).unwrap();
+
+                self.i += 1;
+                if (self.i == tc.text.len()) {
+                    self.line += 1;
+                    self.i = 0;
+                }
+
+                return TickResult::Char(c);
+            },
+            Chunk::Newline => {
+                self.line += 1;
+                return TickResult::Newline;
+            },
+            Chunk::Command(cc) => {
+                match (cc) {
+                    //.WaitPress => {
+                    //    if (keypress) {
+                    //        self.line += 1;
+                    //    } else {
+                    //        return .{ .WaitingForKeypress = void{} };
+                    //    }
+                    //},
+                    //.WaitClick => {
+                    //    if (click) {
+                    //        self.line += 1;
+                    //    } else {
+                    //        return .{ .WaitingForClick = void{} };
+                    //    }
+                    //},
+                    Command::Wait(time) => {
+                        self.line += 1;
+                    },
+                    Command::Clear => {
+                        self.line += 1;
+                        return TickResult::Clear;
+                    },
+                    //.ClearLine => {
+                    //    self.line += 1;
+                    //    return .{ .ClearLine = void{} };
+                    //},
+                    //.SetTextRate => |r| {
+                    //    self.line += 1;
+                    //    return .{ .SetTextRate = r };
+                    //},
+                    //.DumpNoise => |r| {
+                    //    self.line += 1;
+                    //    return .{ .DumpNoise = r };
+                    //},
+                    //.DumpShaderAmp => |r| {
+                    //    self.line += 1;
+                    //    return .{ .DumpShaderAmp = r };
+                    //},
+                    Command::SetStyling(s) => {
+                        self.line += 1;
+                        return TickResult::SetStyling(s.clone());
+                    },
+                    //else => unreachable,
+                    _ => {
+                        panic!("Unsupported");
+                    }
+                }
+            },
+        }
+
+        return TickResult::Noop;
     }
 }
 
@@ -529,21 +573,83 @@ mod tests
 {
     use super::*;
 
+    fn get_as_styling(chunk: &Chunk) -> &Styling {
+        if let Chunk::Command(c) = chunk {
+            if let Command::SetStyling(style) = c {
+                return style;
+            }
+        }
+
+        unreachable!()
+    }
+
+    fn get_as_wait(chunk: &Chunk) -> u32 {
+        if let Chunk::Command(c) = chunk {
+            if let Command::Wait(wait_ms) = c {
+                return *wait_ms;
+            }
+        }
+
+        unreachable!()
+    }
+
+    fn get_as_text(chunk: &Chunk) -> &str {
+        if let Chunk::Text(t) = chunk {
+            return &t.text;
+        }
+
+        unreachable!()
+    }
+
+    fn is_newline(chunk: &Chunk) -> bool {
+        if let Chunk::Newline = chunk {
+            return true;
+        }
+
+        false
+    }
+
+
     #[test]
-    fn test_parse()
+    fn test_parse_inline_command()
     {
-        let parsed = DialogueFile::parse_contents("test", "[talker goose]
-sprite = spr_goose
-sound = snd_goose
+        //let parsed = DialogueFile::parse_contents("test", "hellow (style jitter)jitter(style) nonjitter");
+        let mut i: usize = 0;
+        let parsed = DialogueFile::parse_section("test.adlib", "test", &["hellow (style jitter)jitter(style) nonjitter"], &mut i);
+        let chunks = &parsed.chunks;
 
-# comment
+        println!("{:#?}", chunks);
+        assert_eq!(chunks.len(), 8);
 
-[intro]
-goose | hello there
-(wait 100ms)
-goose | (j) toad (/j)");
+        assert_eq!(get_as_text(&chunks[0]), "hellow");
+        assert!(get_as_styling(&chunks[1]).jitter);
+        assert_eq!(get_as_text(&chunks[2]), " ");
+        assert_eq!(get_as_text(&chunks[3]), "jitter");
+        assert_eq!(get_as_styling(&chunks[4]), &Styling::default());
+        assert_eq!(get_as_text(&chunks[5]), " ");
+        assert_eq!(get_as_text(&chunks[6]), "nonjitter");
+        assert!(is_newline(&chunks[7]));
+    }
 
-        println!("{:#?}", parsed);
-        assert!(false);
+
+    #[test]
+    fn test_multiline()
+    {
+        let mut i: usize = 0;
+        let parsed = DialogueFile::parse_section("test.adlib", "test", 
+            &["hello there",
+            "(wait 1s)",
+            "who are you?"], &mut i);
+
+        let chunks = &parsed.chunks;
+
+        println!("{:#?}", chunks);
+        assert_eq!(chunks.len(), 5);
+
+        assert_eq!(get_as_text(&chunks[0]), "hello there");
+        assert!(is_newline(&chunks[1]));
+        assert_eq!(60, get_as_wait(&chunks[2]));
+        assert_eq!(get_as_text(&chunks[3]), "who are you?");
+        assert!(is_newline(&chunks[4]));
     }
 }

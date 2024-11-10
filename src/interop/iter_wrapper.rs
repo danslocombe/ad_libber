@@ -1,5 +1,6 @@
 use std::ffi::{CString};
 
+/*
 use crate::dialogue::{OwnedAnnotatedStringIterator, SpanAnnotation};
 
 #[derive(Default)]
@@ -30,3 +31,4 @@ impl IterWrapper {
         }
     }
 }
+    */

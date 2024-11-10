@@ -20,6 +20,8 @@ impl Default for DialogueEngineOptions
     }
 }
 
+/*
+
 #[derive(Default, Clone, Debug)]
 pub struct DialogueEngine
 {
@@ -100,3 +102,4 @@ impl DialogueEngine {
         self.annotated_string = self.cursor.as_ref().unwrap().get();
     }
 }
+    */
