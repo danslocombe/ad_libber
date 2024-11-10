@@ -6,11 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#gms_binder = { path = "../gms_binder", optional = true }
 unicase = "2.6.0"
 
 [lib]
 #crate-type = ["cdylib"]
-
-#[features]
-#gms = ["dep:gms_binder"] 
